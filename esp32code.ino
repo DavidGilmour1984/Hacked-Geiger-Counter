@@ -1,62 +1,61 @@
-// ===== ESP32 Geiger — Adaptive Pulse Detector =====
-// Auto-tracks baseline and detects pulses by rising edge above noise
+// ===== ESP32 Geiger Valley-to-Peak Detector (Δ >= 500) =====
+// Counts a pulse when peak minus previous valley >= 500
+// Prints "valley,peak" for each pulse detected
 
-const int pin = 36;
+const int pin = 36; // ADC input (VP)
+int noiseFloor = 100;
+int thresholdDelta = 500;
 
-// adaptive filter coefficients
-float baseline = 0;
-float alpha = 0.02;        // ↓ alpha = more sensitive   ↑ alpha = less sensitive
-int dynamicOffset = 800;   // ↓ dynamicOffset = more sensitive   ↑ = less sensitive
-int minRise = 20;          // ↓ minRise = more sensitive        ↑ = less sensitive
-int endSlope = -8;         // (not sensitivity — leave alone unless pulse merging)
-int refractoryUs = 1800;   // ↓ refractoryUs = more sensitive to close pulses   ↑ = less sensitive / avoids doubles
-
-
-
-bool pulseActive = false;
-int peak = 0;
-int lastV = 0;
+int valley = 4095;    // track lowest seen value
+int peak   = 0;       // track highest seen value
+bool climbing = false;
 unsigned long lastPulseUs = 0;
+unsigned long refractoryUs = 1200; // ignore events too close together
 
 void setup() {
-  Serial.begin(9600);
-  delay(200);
-  Serial.println("READY");
+  Serial.begin(115200);
 }
 
 void loop() {
   int v = analogRead(pin);
-  unsigned long now = micros();
-  int slope = v - lastV;
+  unsigned long nowUs = micros();
 
-  // ===== Adaptive baseline update =====
-  if (!pulseActive) {
-    baseline = baseline * (1.0 - alpha) + v * alpha;
+  if (v < noiseFloor) { 
+    // ignore tiny noise
+    return;
   }
 
-  int delta = v - baseline;  // pulse height above noise floor
-
-  // ===== Pulse start =====
-  if (!pulseActive &&
-      delta > dynamicOffset &&
-      slope > minRise &&
-      (now - lastPulseUs) > refractoryUs)
-  {
-    pulseActive = true;
-    peak = v;
-    lastPulseUs = now;
+  // Update valley if we're not climbing
+  if (!climbing && v < valley) {
+    valley = v;
   }
 
-  // ===== Track max =====
-  if (pulseActive && v > peak) {
+  // Peak tracking if climbing
+  if (climbing && v > peak) {
     peak = v;
   }
 
-  // ===== Pulse end =====
-  if (pulseActive && slope < endSlope) {
-    pulseActive = false;
-    Serial.println(peak);
+  // Detect start of climb
+  if (!climbing && v > valley && (v - valley >= thresholdDelta)) {
+    climbing = true;
+    peak = v;
   }
 
-  lastV = v;
+  // Detect peak finished & pulse confirmed
+  if (climbing && v < peak) {
+    int delta = peak - valley;
+
+    if (delta >= thresholdDelta && (nowUs - lastPulseUs) > refractoryUs) {
+      Serial.print(valley);
+      Serial.print(",");
+      Serial.println(peak);
+
+      lastPulseUs = nowUs;
+    }
+
+    // Reset for next cycle
+    climbing = false;
+    valley = v;
+    peak = v;
+  }
 }
