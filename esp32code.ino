@@ -1,61 +1,61 @@
-// ===== ESP32 Geiger Valley-to-Peak Detector (Δ >= 500) =====
-// Counts a pulse when peak minus previous valley >= 500
-// Prints "valley,peak" for each pulse detected
+// ========= ESP32 HIGH-RATE GEIGER PEAK DETECTOR =========
+// Detects valley -> peak even if pulses overlap.
+// Prints: low,high
+// No delay, ultra-fast loop, works at high CPM
+// Baud: 115200
 
-const int pin = 36; // ADC input (VP)
-int noiseFloor = 100;
-int thresholdDelta = 500;
+const int PIN = 36;
 
-int valley = 4095;    // track lowest seen value
-int peak   = 0;       // track highest seen value
-bool climbing = false;
+// ==== Tuning ====
+int MIN_DELTA = 700;        // pulse = rise of this magnitude
+int BASE_DECAY = 3;         // how fast baseline creeps up
+int RESET_DROP = 30;        // how much ADC must fall to re-arm
+int NOISE_FLOOR = 80;       // ignore below this
+int REFRACTORY_US = 400;    // very short block to avoid double count
+// =================
+
+int baseline = 4095;
+int peak = 0;
+bool armed = true;
 unsigned long lastPulseUs = 0;
-unsigned long refractoryUs = 1200; // ignore events too close together
 
 void setup() {
   Serial.begin(115200);
+  analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);
+  Serial.println("READY");
 }
 
 void loop() {
-  int v = analogRead(pin);
-  unsigned long nowUs = micros();
+  int v = analogRead(PIN);
+  if (v < 0) v = 0;
+  if (v < NOISE_FLOOR) v = NOISE_FLOOR;
 
-  if (v < noiseFloor) { 
-    // ignore tiny noise
-    return;
-  }
+  unsigned long now = micros();
+  bool refractory = (now - lastPulseUs) < REFRACTORY_US;
 
-  // Update valley if we're not climbing
-  if (!climbing && v < valley) {
-    valley = v;
-  }
+  // Track baseline = rolling valley
+  if (v < baseline) baseline = v;
+  else baseline += BASE_DECAY; // slow float upward
 
-  // Peak tracking if climbing
-  if (climbing && v > peak) {
+  int rise = v - baseline;
+
+  // Pulse detected
+  if (armed && !refractory && rise >= MIN_DELTA) {
     peak = v;
+    Serial.print(baseline);
+    Serial.print(",");
+    Serial.println(peak);
+    lastPulseUs = now;
+    armed = false;
   }
 
-  // Detect start of climb
-  if (!climbing && v > valley && (v - valley >= thresholdDelta)) {
-    climbing = true;
-    peak = v;
+  // Re-arm logic when pulse falls a bit
+  if (!armed && (peak - v) >= RESET_DROP) {
+    baseline = v;
+    peak = 0;
+    armed = true;
   }
 
-  // Detect peak finished & pulse confirmed
-  if (climbing && v < peak) {
-    int delta = peak - valley;
-
-    if (delta >= thresholdDelta && (nowUs - lastPulseUs) > refractoryUs) {
-      Serial.print(valley);
-      Serial.print(",");
-      Serial.println(peak);
-
-      lastPulseUs = nowUs;
-    }
-
-    // Reset for next cycle
-    climbing = false;
-    valley = v;
-    peak = v;
-  }
+  // No delay, free-run
 }
