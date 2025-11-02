@@ -1,61 +1,46 @@
-// ========= ESP32 HIGH-RATE GEIGER PEAK DETECTOR =========
-// Detects valley -> peak even if pulses overlap.
-// Prints: low,high
-// No delay, ultra-fast loop, works at high CPM
-// Baud: 115200
+int threshold = 750;       // Default threshold
+const int adcPin = 36;     // VP pin (ADC1_CH0)
+const int pulsePin = 15;   // Pin to pull low
 
-const int PIN = 36;
+bool inPulse = false;
+int minVal = 4095;
 
-// ==== Tuning ====
-int MIN_DELTA = 700;        // pulse = rise of this magnitude
-int BASE_DECAY = 3;         // how fast baseline creeps up
-int RESET_DROP = 30;        // how much ADC must fall to re-arm
-int NOISE_FLOOR = 80;       // ignore below this
-int REFRACTORY_US = 400;    // very short block to avoid double count
-// =================
-
-int baseline = 4095;
-int peak = 0;
-bool armed = true;
-unsigned long lastPulseUs = 0;
+unsigned long startTime;
 
 void setup() {
   Serial.begin(115200);
-  analogReadResolution(12);
-  analogSetAttenuation(ADC_11db);
-  Serial.println("READY");
+  analogReadResolution(12); // 0–4095
+  pinMode(pulsePin, OUTPUT);
+  digitalWrite(pulsePin, HIGH); // keep high initially
+  startTime = millis();
 }
 
 void loop() {
-  int v = analogRead(PIN);
-  if (v < 0) v = 0;
-  if (v < NOISE_FLOOR) v = NOISE_FLOOR;
 
-  unsigned long now = micros();
-  bool refractory = (now - lastPulseUs) < REFRACTORY_US;
-
-  // Track baseline = rolling valley
-  if (v < baseline) baseline = v;
-  else baseline += BASE_DECAY; // slow float upward
-
-  int rise = v - baseline;
-
-  // Pulse detected
-  if (armed && !refractory && rise >= MIN_DELTA) {
-    peak = v;
-    Serial.print(baseline);
-    Serial.print(",");
-    Serial.println(peak);
-    lastPulseUs = now;
-    armed = false;
+  // trigger D15 low 20 seconds after power-on for 0.5 sec
+  if ((millis() - startTime) >= 20000 && (millis() - startTime) < 20500) {
+    digitalWrite(pulsePin, LOW);
+  } else if ((millis() - startTime) >= 20500) {
+    digitalWrite(pulsePin, HIGH);
   }
 
-  // Re-arm logic when pulse falls a bit
-  if (!armed && (peak - v) >= RESET_DROP) {
-    baseline = v;
-    peak = 0;
-    armed = true;
+  // Read ADC from VP pin
+  int v = analogRead(adcPin);
+
+  // Start of pulse
+  if (!inPulse && v < threshold) {
+    inPulse = true;
+    minVal = v;
   }
 
-  // No delay, free-run
+  // Track minimum during pulse
+  if (inPulse) {
+    if (v < minVal) minVal = v;
+
+    // End of pulse, signal rising back above threshold
+    if (v > threshold) {
+      inPulse = false;
+      Serial.println(minVal);
+    }
+  }
 }
