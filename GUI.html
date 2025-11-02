@@ -1,135 +1,96 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8" />
-<title>Geiger Counter Live Monitor</title>
+<meta charset="utf-8">
+<title>ESP32 Geiger Pulse Monitor</title>
 <style>
-  body { font-family: Helvetica; background:#f5f7fb; margin:0; padding:20px; color:#111; }
-  button { font-size:20px; padding:10px 18px; margin:8px; border:none; cursor:pointer;
-    background:#2563eb; color:white; border-radius:8px; }
-  button:hover { background:#1e40af; }
-  #dataBox { margin-top:20px; padding:15px; background:#fff; border-radius:10px; 
-    box-shadow:0px 2px 12px rgba(0,0,0,0.1); width:280px; }
-  .label { font-size:18px; margin-top:5px; }
-  .value { font-size:32px; font-weight:bold; }
-
-  table { margin-top:20px; width:100%; border-collapse:collapse; background:white; }
-  th, td { padding:6px; font-size:18px; border-bottom:1px solid #ddd; text-align:center; }
-  th { background:#e5e7eb; font-weight:bold; }
-  #pulseTableWrapper {
-    max-height:300px; 
-    overflow-y:auto;
-    margin-top:15px;
-    background:white;
-    border-radius:8px;
-    box-shadow:0 2px 10px rgba(0,0,0,0.08);
-  }
+body {
+  font-family: Helvetica, Arial, sans-serif;
+  background:#f5f7fb; color:#111;
+  padding:20px; margin:0;
+}
+.card {
+  background:white; padding:20px;
+  border-radius:12px; max-width:600px;
+  margin:auto; box-shadow:0 2px 6px rgba(0,0,0,0.15);
+}
+button {
+  font-size:20px; background:#2563eb;
+  color:white; padding:10px 20px;
+  border:none; border-radius:8px;
+  cursor:pointer;
+}
+button:hover { background:#1e40af; }
+.data-box { font-size:26px; margin:10px 0; }
 </style>
 </head>
-
 <body>
 
-<h2>ESP32 Geiger Counter Monitor</h2>
+<div class="card">
+<h2>ESP32 Geiger Pulse Monitor</h2>
+<button id="connect">Connect</button>
 
-<button id="connectBtn">Connect</button>
-<button id="startBtn">Start</button>
-<button id="stopBtn">Stop</button>
+<div class="data-box">Last Pulse Min ADC: <span id="adc">--</span></div>
+<div class="data-box">CPM: <span id="cpm">0</span></div>
+<div class="data-box">µSv/h: <span id="usvh">0.000</span></div>
 
-<div id="dataBox">
-  <div class="label">CPM</div>
-  <div class="value" id="cpm">0</div>
-  <div class="label">µSv/h</div>
-  <div class="value" id="usvh">0.000</div>
+<div style="margin-top:20px;font-size:20px;">
+Threshold: <span id="thval">600</span>
+<input type="range" id="thrSlider" min="0" max="4095" value="600" style="width:100%;">
 </div>
-
-<h3>Pulses (Low → High)</h3>
-<div id="pulseTableWrapper">
-<table id="pulseTable">
-  <thead>
-    <tr><th>Low</th><th>High</th></tr>
-  </thead>
-  <tbody id="pulseBody"></tbody>
-</table>
 </div>
 
 <script>
-let port, reader;
-let pulses = [];
-const C_FACTOR = 0.0057; 
-let logging = false;
-
-// for table
-const pulseRows = [];
+let port, reader, writer;
+let textDecoder = new TextDecoderStream();
+let samples = [];
+const conversionFactor = 0.0057;
 
 async function connectSerial() {
   port = await navigator.serial.requestPort();
   await port.open({ baudRate: 115200 });
-  logging = true;
+
+  port.readable.pipeTo(textDecoder.writable);
+  reader = textDecoder.readable.getReader();
+  writer = port.writable.getWriter();
+
   readLoop();
 }
 
 async function readLoop() {
-  const decoder = new TextDecoderStream();
-  port.readable.pipeTo(decoder.writable);
-  const input = decoder.readable;
-  const textReader = input.getReader();
-
-  let buf = "";
-
-  while (logging) {
-    const { value, done } = await textReader.read();
+  while (true) {
+    const { value, done } = await reader.read();
     if (done) break;
     if (!value) continue;
 
-    buf += value;
-    let lines = buf.split("\n");
-    buf = lines.pop();
+    const line = value.trim();
+    const v = parseInt(line);
 
-    for (let line of lines) {
-      line = line.trim();
-      if (!line.includes(",")) continue;
-
-      let parts = line.split(",");
-      if (parts.length !== 2) continue;
-
-      let low = parseInt(parts[0]);
-      let high = parseInt(parts[1]);
-      if (isNaN(low) || isNaN(high)) continue;
-
-      pulses.push(Date.now());
-
-      // Add to visible table top
-      pulseRows.unshift(`<tr><td>${low}</td><td>${high}</td></tr>`);
-      if (pulseRows.length > 200) pulseRows.pop(); // limit rows
-
-      document.getElementById("pulseBody").innerHTML = pulseRows.join("");
-    }
+    if (!isNaN(v)) handlePulse(v);
   }
 }
 
-function updateDisplay() {
-  let now = Date.now();
-  pulses = pulses.filter(t => now - t < 60000);
+function handlePulse(minValue) {
+  document.getElementById("adc").textContent = minValue;
 
-  let cpm = pulses.length;
-  let uSv = cpm * C_FACTOR;
+  const now = Date.now();
+  samples.push(now);
+  samples = samples.filter(t => now - t <= 60000);
 
-  document.getElementById("cpm").textContent = cpm;
-  document.getElementById("usvh").textContent = uSv.toFixed(3);
+  const CPM = samples.length;
+  const uSvH = CPM * conversionFactor;
+
+  document.getElementById("cpm").textContent = CPM;
+  document.getElementById("usvh").textContent = uSvH.toFixed(3);
 }
 
-document.getElementById("connectBtn").onclick = connectSerial;
+document.getElementById("thrSlider").addEventListener("input", e => {
+  const t = parseInt(e.target.value);
+  document.getElementById("thval").textContent = t;
+  if (writer) writer.write(new TextEncoder().encode("T" + t + "\n"));
+});
 
-document.getElementById("startBtn").onclick = () => {
-  pulses = [];
-  pulseRows.length = 0;
-  document.getElementById("pulseBody").innerHTML = "";
-  logging = true;
-};
-
-document.getElementById("stopBtn").onclick = () => logging = false;
-
-setInterval(updateDisplay, 500);
+document.getElementById("connect").addEventListener("click", connectSerial);
 </script>
 
 </body>
