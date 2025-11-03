@@ -214,10 +214,13 @@ function addBin(v){
 }
 
 function addRow(t,total,interval,uSv){
-  const row =
-`<tr><td>${t}</td><td>${total}</td><td>${interval}</td><td>${uSv.toFixed(3)}</td></tr>`;
-  table.innerHTML = table.rows[0].outerHTML + row + table.innerHTML.slice(table.rows[0].outerHTML.length);
+  const newRow = table.insertRow(1);
+  newRow.insertCell(0).textContent = t;
+  newRow.insertCell(1).textContent = total;
+  newRow.insertCell(2).textContent = interval;
+  newRow.insertCell(3).textContent = uSv.toFixed(3);
 }
+
 
 function handlePulse(v){
   if(!running) return;
