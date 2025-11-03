@@ -2,75 +2,147 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>ESP32 Geiger Pulse Monitor</title>
+<title>ESP32 Radiation Monitor</title>
 
 <style>
 body {
   font-family: Helvetica, Arial, sans-serif;
-  background:#f5f7fb; color:#111;
+  background:#eef2f8;
+  color:#0d1117;
   margin:0; padding:20px;
 }
 .card {
-  background:white; padding:20px;
-  border-radius:12px; max-width:1100px;
-  margin:auto; box-shadow:0 2px 6px rgba(0,0,0,0.15);
+  background:#ffffff;
+  padding:22px;
+  border-radius:16px;
+  max-width:1200px;
+  margin:auto;
+  box-shadow:0 3px 10px rgba(0,0,0,0.15);
+}
+h2 {
+  margin-bottom:12px;
+  font-weight:600;
+  color:#0d1117;
 }
 button {
-  font-size:18px; background:#2563eb;
-  color:white; padding:8px 16px;
-  border:none; border-radius:8px;
-  cursor:pointer; margin-right:6px;
+  font-size:18px;
+  background:#2563eb;
+  color:white;
+  padding:8px 18px;
+  border:none;
+  border-radius:8px;
+  cursor:pointer;
+  margin-right:6px;
 }
 button:hover { background:#1e40af; }
-.data-box { font-size:22px; margin:8px 0; }
-
-canvas {
-  background:white;
+select {
+  font-size:17px;
+  padding:6px;
+  margin-top:10px;
+  border-radius:6px;
   border:1px solid #ccc;
-  width:100%; height:200px;
-  display:block;
 }
-
+.data-box {
+  font-size:20px;
+  margin:6px 0;
+  font-weight:500;
+}
+.canvas-box {
+  background:white;
+  padding:8px;
+  border-radius:8px;
+  border:1px solid #ccc;
+  margin-top:10px;
+}
+canvas {
+  width:100%;
+  height:200px;
+}
 table {
-  width:100%; margin-top:10px; border-collapse:collapse;
-  font-size:18px;
+  width:100%;
+  margin-top:14px;
+  border-collapse:collapse;
+  font-size:17px;
 }
-th, td { border:1px solid #ccc; padding:6px; text-align:center; }
+th, td {
+  border:1px solid #ccc;
+  padding:5px;
+  text-align:center;
+}
+th {
+  background:#f2f4f8;
+  font-weight:600;
+}
 
-label { font-size:18px; }
+/* *** NEW Radiation Bar Style (solid green→red) *** */
+.range-bar {
+  position:relative;
+  height:35px;
+  margin-top:20px;
+  border-radius:10px;
+  overflow:hidden;
+  border:1px solid #b3becd;
+  background:#cccccc;
+}
+.range-fill {
+  height:100%;
+  width:0%;
+  background:linear-gradient(90deg,
+    #00a000 0%,    /* green */
+    #4dc400 30%,   /* yellow-green */
+    #ffd800 55%,   /* amber */
+    #ff7b00 75%,   /* orange */
+    #d40000 100%   /* red */
+  );
+  transition:width 0.25s ease-in-out;
+}
+.context-label-live {
+  font-size:18px;
+  text-align:right;
+  margin-top:6px;
+  font-weight:600;
+  color:#0d1117;
+}
 </style>
 </head>
 
 <body>
 <div class="card">
-
-<h2>ESP32 Geiger Pulse Monitor</h2>
+<h2>ESP32 Radiation Monitor</h2>
 
 <button id="connect">Connect</button>
 <button id="startBtn">Start</button>
 <button id="stopBtn">Stop</button>
 <button id="exportBtn">Export CSV</button>
 
-<div class="data-box">Last Pulse Min ADC: <span id="adc">--</span></div>
+<div class="data-box">Last Pulse ADC: <span id="adc">--</span></div>
 <div class="data-box">Total Counts: <span id="total">0</span></div>
+<div class="data-box">Dose Rate: <span id="dose">0.000</span> µSv/h</div>
 
-<label>Counts per: <span id="timeScaleLabel">Second</span></label>
-<input type="range" id="timeScale" min="0" max="2" value="0">
+<label>Counts per:</label>
+<select id="avgSelect">
+  <option value="1">Second</option>
+  <option value="60">Minute</option>
+  <option value="300">5 Minutes</option>
+  <option value="600">10 Minutes</option>
+</select>
 
-<br><br>
-
-<label>Threshold: <span id="thval">600</span></label>
-<input type="range" id="thrSlider" min="0" max="4095" value="600" style="width:100%;">
-
-<br><br>
-
+<div class="canvas-box">
 <canvas id="histCanvas" width="1000" height="200"></canvas>
+</div>
+
+<!-- SOLID RANGE BAR -->
+<div class="range-bar">
+  <div class="range-fill" id="rangeFill"></div>
+</div>
+<div class="context-label-live" id="contextLabel">Normal Background</div>
 
 <table id="dataTable">
 <tr>
   <th>Time (s)</th>
-  <th>Total Counts</th>
+  <th>Total</th>
   <th>Counts/Interval</th>
+  <th>µSv/h</th>
 </tr>
 </table>
 
@@ -79,151 +151,142 @@ label { font-size:18px; }
 <script>
 let port, reader, writer;
 let decoder = new TextDecoderStream();
-
 let running = false;
 let startTime = 0;
 let totalCounts = 0;
 let intervalCounts = 0;
-
-// histogram bins
 let bins = [];
 const barWidth = 2;
 
-// time modes
-const timeLabels = ["Second","Minute","Hour"];
-const msPerBin = [1000, 60000, 3600000];
-let timeMode = 0;
+const uSvPerCPM = 0.0057;
+
+/* *** UPDATED THRESHOLD SCALE (0-100 µSv/h only) *** */
+const thresholds = [
+  { level:0.01,  name:"Deep Underground Lab" },
+  { level:0.05,  name:"Normal Background" },
+  { level:0.15,  name:"NZ Background (typical)" },
+  { level:1,     name:"High-background region" },
+  { level:3,     name:"Commercial Flight" },
+  { level:6,     name:"High-Altitude City" },
+  { level:8,     name:"Polar Aviation Route" },
+  { level:12,    name:"Dental X-ray (rate)" },
+  { level:20,    name:"Fukushima Perimeter" },
+  { level:30,    name:"Radon Hotspot (UK)" },
+  { level:50,    name:"Ramsar, Iran" },
+  { level:100,   name:"Fukushima Worker Gate" }
+];
+
+let avgWindow = 1;
 
 const canvas = document.getElementById("histCanvas");
 const ctx = canvas.getContext("2d");
 const table = document.getElementById("dataTable");
+const doseLabel = document.getElementById("dose");
+const rangeFill = document.getElementById("rangeFill");
+const contextLabel = document.getElementById("contextLabel");
 
-// RESET EVERYTHING
 function resetAll() {
   totalCounts = 0;
   intervalCounts = 0;
   bins = [];
   startTime = performance.now();
-
   document.getElementById("total").textContent = "0";
-
-  table.innerHTML =
-    `<tr>
-      <th>Time (s)</th>
-      <th>Total Counts</th>
-      <th>Counts/Interval</th>
-    </tr>`;
-
-  drawHistogram();
+  table.innerHTML = 
+`<tr><th>Time (s)</th><th>Total</th><th>Counts/Interval</th><th>µSv/h</th></tr>`;
 }
 
-// Draw Histogram
 function drawHistogram() {
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  if(bins.length === 0) return;
-
-  const maxVal = Math.max(...bins);
-  const scale = maxVal > 0 ? canvas.height / maxVal : 1;
-
-  for (let i = 0; i < bins.length; i++) {
-    const h = bins[i] * scale;
-    ctx.fillStyle = "#2563eb";
-    ctx.fillRect(i * barWidth, canvas.height - h, barWidth, h);
+  if (bins.length===0) return;
+  const max = Math.max(...bins);
+  const scale = max>0 ? canvas.height/max : 1;
+  for (let i=0;i<bins.length;i++){
+    ctx.fillStyle="#2563eb";
+    ctx.fillRect(i*barWidth, canvas.height-(bins[i]*scale), barWidth, bins[i]*scale);
   }
 }
 
-// Add new histogram column
-function addBin(v) {
+function addBin(v){
   bins.push(v);
-  const maxBars = Math.floor(canvas.width / barWidth);
-  if(bins.length > maxBars) bins.shift();
+  const maxBars = Math.floor(canvas.width/barWidth);
+  if(bins.length>maxBars) bins.shift();
   drawHistogram();
 }
 
-// Put latest row at top
-function addTableRow(t, total, interval) {
+function addRow(t,total,interval,uSv){
   const row =
-    `<tr>
-      <td>${t}</td>
-      <td>${total}</td>
-      <td>${interval}</td>
-    </tr>`;
-
-  table.innerHTML =
-    table.rows[0].outerHTML + row + table.innerHTML.slice(table.rows[0].outerHTML.length);
+`<tr><td>${t}</td><td>${total}</td><td>${interval}</td><td>${uSv.toFixed(3)}</td></tr>`;
+  table.innerHTML = table.rows[0].outerHTML + row + table.innerHTML.slice(table.rows[0].outerHTML.length);
 }
 
-// Handle ADC pulse event
-function handlePulse(v) {
+function handlePulse(v){
   if(!running) return;
-  document.getElementById("adc").textContent = v;
+  document.getElementById("adc").textContent=v;
   totalCounts++;
   intervalCounts++;
-  document.getElementById("total").textContent = totalCounts;
+  document.getElementById("total").textContent=totalCounts;
 }
 
-// Every 1 second: process interval
-setInterval(() => {
-  if(!running) return;
+function classify(uSv){
+  for (let i=0;i<thresholds.length;i++){
+    if(uSv <= thresholds[i].level) return thresholds[i].name;
+  }
+  return thresholds[thresholds.length-1].name;
+}
 
-  const elapsed = Math.floor((performance.now() - startTime) / 1000); // whole seconds
-  addBin(intervalCounts);
-  addTableRow(elapsed, totalCounts, intervalCounts);
-
-  intervalCounts = 0;
-}, 1000);
-
-// Serial Reading
-async function readLoop() {
+async function readLoop(){
   while(true){
-    const {value,done} = await reader.read();
+    const {value,done}=await reader.read();
     if(done) break;
     if(!value) continue;
-    const n = parseInt(value.trim());
-    if(!isNaN(n)) handlePulse(n);
+    const x=parseInt(value.trim());
+    if(!isNaN(x)) handlePulse(x);
   }
 }
 
-// Buttons
-document.getElementById("connect").onclick = async () => {
-  port = await navigator.serial.requestPort();
-  await port.open({baudRate:115200});
-  port.readable.pipeTo(decoder.writable);
-  reader = decoder.readable.getReader();
-  writer = port.writable.getWriter();
-  readLoop();
+/* update once per second */
+setInterval(()=>{
+ if(!running) return;
+ const elapsed = Math.floor((performance.now()-startTime)/1000);
+ const cps = intervalCounts;
+ const cpm = cps * 60;
+ const uSv = cpm * uSvPerCPM;
+
+ doseLabel.textContent = uSv.toFixed(3);
+
+ /* Solid bar, capped at 100 µSv/h */
+ const pct = Math.min(100, (uSv/100)*100);
+ rangeFill.style.width = pct + "%";
+ contextLabel.textContent = classify(uSv);
+
+ addBin(intervalCounts);
+ addRow(elapsed,totalCounts,intervalCounts,uSv);
+
+ intervalCounts = 0;
+},1000);
+
+document.getElementById("connect").onclick=async()=>{
+ port=await navigator.serial.requestPort();
+ await port.open({baudRate:115200});
+ port.readable.pipeTo(decoder.writable);
+ reader=decoder.readable.getReader();
+ writer=port.writable.getWriter();
+ readLoop();
 };
 
-document.getElementById("startBtn").onclick = () => {
-  running = true;
-  resetAll();
-};
+document.getElementById("startBtn").onclick=()=>{running=true;resetAll();};
+document.getElementById("stopBtn").onclick=()=>running=false;
+document.getElementById("avgSelect").onchange=e=>{avgWindow=parseInt(e.target.value);};
 
-document.getElementById("stopBtn").onclick = () => running = false;
-
-// Time mode slider (label only)
-document.getElementById("timeScale").oninput = e => {
-  timeMode = parseInt(e.target.value);
-  document.getElementById("timeScaleLabel").textContent = timeLabels[timeMode];
-};
-
-// Threshold slider → send to ESP32
-document.getElementById("thrSlider").oninput = e => {
-  const t = e.target.value;
-  document.getElementById("thval").textContent = t;
-  if(writer) writer.write(new TextEncoder().encode("T"+t+"\n"));
-};
-
-// Export CSV
-document.getElementById("exportBtn").onclick = () => {
-  const rows = [["Time (s)","Total Counts","Counts/Interval"]];
-  [...table.rows].slice(1).forEach(r=>{
-    rows.push([r.cells[0].innerText, r.cells[1].innerText, r.cells[2].innerText]);
-  });
-  const blob = new Blob([rows.map(r=>r.join(",")).join("\n")],{type:"text/csv"});
-  const url = URL.createObjectURL(blob);
-  const a=document.createElement("a");
-  a.href=url; a.download="geiger_data.csv"; a.click();
+document.getElementById("exportBtn").onclick=()=>{
+ let rows=[["Time","Total","Interval","µSv/h"]];
+ [...table.rows].slice(1).forEach(r=>{
+   rows.push([r.cells[0].innerText,r.cells[1].innerText,r.cells[2].innerText,r.cells[3].innerText]);
+ });
+ const blob=new Blob([rows.map(r=>r.join(",")).join("\n")],{type:"text/csv"});
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement("a");
+ a.href=url;a.download="radiation_log.csv";a.click();
 };
 </script>
 
