@@ -74,7 +74,7 @@ th {
   font-weight:600;
 }
 
-/* *** NEW Radiation Bar Style (solid green→red) *** */
+/* Solid bar background */
 .range-bar {
   position:relative;
   height:35px;
@@ -84,18 +84,15 @@ th {
   border:1px solid #b3becd;
   background:#cccccc;
 }
+
+/* Filled section — colour updated dynamically by JS */
 .range-fill {
   height:100%;
   width:0%;
-  background:linear-gradient(90deg,
-    #00a000 0%,    /* green */
-    #4dc400 30%,   /* yellow-green */
-    #ffd800 55%,   /* amber */
-    #ff7b00 75%,   /* orange */
-    #d40000 100%   /* red */
-  );
-  transition:width 0.25s ease-in-out;
+  background:#00a000;
+  transition:width 0.25s ease-in-out, background-color 0.25s linear;
 }
+
 .context-label-live {
   font-size:18px;
   text-align:right;
@@ -131,7 +128,6 @@ th {
 <canvas id="histCanvas" width="1000" height="200"></canvas>
 </div>
 
-<!-- SOLID RANGE BAR -->
 <div class="range-bar">
   <div class="range-fill" id="rangeFill"></div>
 </div>
@@ -157,10 +153,8 @@ let totalCounts = 0;
 let intervalCounts = 0;
 let bins = [];
 const barWidth = 2;
-
 const uSvPerCPM = 0.0057;
 
-/* *** UPDATED THRESHOLD SCALE (0-100 µSv/h only) *** */
 const thresholds = [
   { level:0.01,  name:"Deep Underground Lab" },
   { level:0.05,  name:"Normal Background" },
@@ -191,8 +185,7 @@ function resetAll() {
   bins = [];
   startTime = performance.now();
   document.getElementById("total").textContent = "0";
-  table.innerHTML = 
-`<tr><th>Time (s)</th><th>Total</th><th>Counts/Interval</th><th>µSv/h</th></tr>`;
+  table.innerHTML = `<tr><th>Time (s)</th><th>Total</th><th>Counts/Interval</th><th>µSv/h</th></tr>`;
 }
 
 function drawHistogram() {
@@ -214,13 +207,12 @@ function addBin(v){
 }
 
 function addRow(t,total,interval,uSv){
-  const newRow = table.insertRow(1);
-  newRow.insertCell(0).textContent = t;
-  newRow.insertCell(1).textContent = total;
-  newRow.insertCell(2).textContent = interval;
-  newRow.insertCell(3).textContent = uSv.toFixed(3);
+  const r = table.insertRow(1);
+  r.insertCell(0).textContent = t;
+  r.insertCell(1).textContent = total;
+  r.insertCell(2).textContent = interval;
+  r.insertCell(3).textContent = uSv.toFixed(3);
 }
-
 
 function handlePulse(v){
   if(!running) return;
@@ -257,10 +249,20 @@ setInterval(()=>{
 
  doseLabel.textContent = uSv.toFixed(3);
 
- /* Solid bar, capped at 100 µSv/h */
  const pct = Math.min(100, (uSv/100)*100);
  rangeFill.style.width = pct + "%";
  contextLabel.textContent = classify(uSv);
+
+ // colour change solid fill green→yellow→red
+ let r, g;
+ if (pct <= 50) {
+   r = Math.floor((pct/50) * 255);
+   g = 160 + Math.floor((pct/50) * (255-160));
+ } else {
+   r = 255 - Math.floor(((pct-50)/50) * (255-212));
+   g = 255 - Math.floor(((pct-50)/50) * 255);
+ }
+ rangeFill.style.background = `rgb(${r},${g},0)`;
 
  addBin(intervalCounts);
  addRow(elapsed,totalCounts,intervalCounts,uSv);
