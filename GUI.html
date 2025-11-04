@@ -61,68 +61,113 @@ button:hover { background:#1e40af; }
   height:100%; width:0%; background:green;
   transition:width .25s, background-color .25s;
 }
+\.histogram-container {
+  display:flex;
+  gap:20px;
+  width:100vw;
+  position:relative;
+  left:50%;
+  margin-left:-50vw;
+  margin-top:20px;
+}
+.histogram-container {
+  display:flex;
+  flex-direction:row;
+  gap:20px;
+  width:100%;
+  margin-top:20px;
+}
+
+/* half height (180px instead of 360px) */
+.hist-card {
+  flex:1;
+  background:white;
+  padding:18px;
+  border-radius:14px;
+  box-shadow:0 3px 10px rgba(0,0,0,0.15);
+  height:180px;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-start;
+}
+
+/* Chart canvas (same height as bar) */
+#cpsCanvas {
+  width:100%;
+  height:100%;
+  background:white;
+  border:1px solid #ccc;
+  border-radius:8px;
+  display:block;
+}
+
 </style>
 </head>
 
 <body>
-<h2>GeigerLink</h2>
-
 <div class="row">
 
-<!-- Controls -->
-<div class="col">
-<div class="card equal-card">
-<h3>Controls</h3>
-<button id="connectBtn">Connect</button>
-<button id="startBtn">Start</button>
-<button id="stopBtn">Stop</button>
-<button id="exportBtn">Export CSV</button><br>
-<button id="soundToggleBtn">Sound: OFF</button>
-</div>
+  <!-- Controls -->
+  <div class="col">
+    <div class="card equal-card">
+      <h3>GeigerLink Controls</h3>
+      <button id="connectBtn">Connect</button>
+      <button id="startBtn">Start</button>
+      <button id="stopBtn">Stop</button>
+      <button id="exportBtn">Export CSV</button><br>
+      <button id="soundToggleBtn">Sound: OFF</button>
+    </div>
+  </div>
+
+  <!-- Live Data -->
+  <div class="col">
+    <div class="card equal-card">
+      <h3>Live Data</h3>
+      <table class="live-table">
+        <tr><td><b>ADC</b></td><td id="live_adc">0</td></tr>
+        <tr><td><b>Total Counts</b></td><td id="live_total">0</td></tr>
+        <tr><td><b>CPS</b></td><td id="live_rate">0.0</td></tr>
+        <tr><td><b>CPM</b></td><td id="live_cpm">0</td></tr>
+        <tr><td><b>µSv/h</b></td><td id="live_usvh">0.000</td></tr>
+        <tr><td><b>mrem/h</b></td><td id="live_mremh">0.000</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- Logging -->
+  <div class="col">
+    <div class="card equal-card">
+      <h3>Logging</h3>
+      <div class="scroll-box">
+        <table class="log-table">
+          <thead>
+            <tr><th>Time</th><th>CPS</th><th>Total</th></tr>
+          </thead>
+          <tbody id="pulseTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>
 
-<!-- Live Data -->
-<div class="col">
-<div class="card equal-card">
-<h3>Live Data</h3>
-<table class="live-table">
-<tr><td><b>ADC</b></td><td id="live_adc">0</td></tr>
-<tr><td><b>Total Counts</b></td><td id="live_total">0</td></tr>
-<tr><td><b>CPS</b></td><td id="live_rate">0.0</td></tr>
-<tr><td><b>CPM</b></td><td id="live_cpm">0</td></tr>
-<tr><td><b>µSv/h</b></td><td id="live_usvh">0.000</td></tr>
-<tr><td><b>mrem/h</b></td><td id="live_mremh">0.000</td></tr>
-</table>
-</div>
-</div>
+<!-- Dose Bar + Histogram side-by-side -->
+<div class="histogram-container">
 
-<!-- Logging -->
-<div class="col">
-<div class="card equal-card">
-<h3>Logging</h3>
-<div class="scroll-box">
-<table class="log-table">
-<thead><tr><th>Time</th><th>CPS</th><th>Total</th></tr></thead>
-<tbody id="pulseTable"></tbody>
-</table>
-</div>
-</div>
-</div>
-
-</div>
-
-<!-- Dose bar FULL PAGE WIDTH -->
-<div style="width:100vw; position:relative; left:50%; right:50%; margin-left:-50vw; margin-right:-50vw; margin-top:20px;">
-  <div class="card" style="width:100%; box-sizing:border-box;">
+  <!-- Radiation Level -->
+  <div class="hist-card">
     <h3>Radiation Level</h3>
     <div class="range-bar"><div id="bar" class="fill"></div></div>
     <div id="contextText" style="font-size:18px; margin-top:8px; font-weight:600;">
       Radiation level equal to: Normal Background
     </div>
   </div>
+
+  <!-- CPS Histogram -->
+  <div class="hist-card">
+    <canvas id="cpsCanvas"></canvas>
+  </div>
+
 </div>
-
-
 
 <script>
 let port, reader, writer;
@@ -131,6 +176,8 @@ let running = false;
 let startTime = 0;
 let totalCounts = 0;
 let intervalCounts = 0;
+let cpsHistory = new Array(120).fill(0); // 120 seconds of CPS
+
 const uSvPerCPM = 0.0057;
 
 /* rolling windows */
@@ -270,6 +317,7 @@ setInterval(()=>{
  if(doseWindow.length > windowSize) doseWindow.shift();
  const avgDose = doseWindow.reduce((a,b)=>a+b,0) / doseWindow.length;
 
+ // live values
  document.getElementById("live_rate").textContent  = avgCPS.toFixed(1);
  document.getElementById("live_cpm").textContent   = Math.round(avgCPM);
  document.getElementById("live_usvh").textContent  = avgDose.toFixed(3);
@@ -283,9 +331,17 @@ setInterval(()=>{
  document.getElementById("contextText").textContent =
    "Radiation level equal to: " + classify(avgDose);
 
+ // log table row
  const r=document.createElement("tr");
  r.innerHTML=`<td>${elapsed}</td><td>${avgCPS.toFixed(1)}</td><td>${totalCounts}</td>`;
  document.getElementById("pulseTable").prepend(r);
+
+ // push smoothed CPS into history
+ cpsHistory.push(avgCPS);
+ if(cpsHistory.length > 120) cpsHistory.shift(); // keep 2 minutes
+
+ // redraw histogram
+ drawCPSHistogram();
 
  intervalCounts = 0;
 },1000);
@@ -302,6 +358,40 @@ document.getElementById("exportBtn").onclick=()=>{
  a.download="radiation_log.csv";
  a.click();
 };
+function drawCPSHistogram() {
+  const canvas = document.getElementById("cpsCanvas");
+  const ctx = canvas.getContext("2d");
+
+  const styleWidth = canvas.clientWidth;
+  const styleHeight = canvas.clientHeight;
+  canvas.width = styleWidth;
+  canvas.height = styleHeight;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // bar width ~2mm
+  const pxPerMM = window.devicePixelRatio * 3.78;
+  const barWidth = pxPerMM * 2;
+  const maxBars = Math.floor(canvas.width / barWidth);
+
+  const data = cpsHistory.slice(-maxBars);
+  const maxCPS = Math.max(...data, 1);
+
+  const scale = (canvas.height * 0.8) / maxCPS;
+
+  ctx.fillStyle = "#2563eb";
+
+  for (let i = 0; i < data.length; i++) {
+    const value = data[i];
+    const barHeight = value * scale;
+    const x = i * barWidth;
+    const y = canvas.height - barHeight;
+
+    ctx.fillRect(x, y, barWidth - 1, barHeight);
+  }
+}
+
+
 </script>
 </body>
 </html>
