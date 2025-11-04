@@ -187,19 +187,30 @@ const windowSize = 30; // last 10 seconds smoothing
 
 /* thresholds */
 const thresholds = [
-{level:0.01, name:"Deep Underground Lab"},
-{level:0.05, name:"Normal Background"},
-{level:0.15, name:"NZ Background (typical)"},
-{level:1, name:"High-background region"},
-{level:3, name:"Commercial Flight"},
-{level:6, name:"High-altitude city"},
-{level:8, name:"Polar aviation route"},
-{level:12, name:"Dental X-ray (hour)"},
-{level:20, name:"Fukushima Perimeter"},
-{level:30, name:"Radon Hotspot (UK)"},
-{level:50, name:"Ramsar, Iran"},
-{level:100, name:"Fukushima Worker Gate"}
+  {level:0.01, name:"Deep Underground Lab"},
+  {level:0.03, name:"Tokyo, Japan"},
+  {level:0.05, name:"London, UK"},
+  {level:0.08, name:"Sydney, Australia"},
+  {level:0.12, name:"Wellington, New Zealand"},
+  {level:0.15, name:"New York City"},
+  {level:0.45, name:"Denver, Colorado"},
+  {level:0.6, name:"Kowloon, Hong Kong (granite)"},
+{level:0.7, name:"Rome, Italy (volcanic)"},
+{level:0.9, name:"Guarapari Beach, Brazil (monazite sand)"},
+{level:1.2, name:"Kerala, India (thorium sands)"},
+{level:1.5, name:"Cornwall, UK (radon granite)"},
+{level:1.6, name:"Aberdeen, Scotland (granite geology)"},
+{level:1.7, name:"Jáchymov, Czech Republic (uranium spas)"},
+{level:1.9, name:"Yangjiang, China (high natural radiation)"},
+  {level:3, name:"Commercial Flight"},
+  {level:8, name:"Polar aviation route"},
+  {level:12, name:"Dental X-ray (hour)"},
+  {level:20, name:"Fukushima Perimeter"},
+  {level:30, name:"Radon Hotspot (UK)"},
+  {level:50, name:"Ramsar, Iran"},
+  {level:100, name:"Fukushima Worker Gate"}
 ];
+
 function classify(u){
  for(let t of thresholds) if(u <= t.level) return t.name;
  return thresholds.at(-1).name;
