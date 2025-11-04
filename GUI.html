@@ -2,146 +2,129 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>ESP32 Radiation Monitor</title>
+<title>GeigerLink</title>
+
+<!-- Correct radiation trefoil favicon -->
+<link rel="icon" href='data:image/svg+xml;utf8,
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+<circle cx="100" cy="100" r="95" fill="yellow" stroke="black" stroke-width="12"/>
+<circle cx="100" cy="100" r="22" fill="black"/>
+<path d="M100 35 L135 115 L65 115 Z" fill="black" transform="rotate(0 100 100)"/>
+<path d="M100 35 L135 115 L65 115 Z" fill="black" transform="rotate(120 100 100)"/>
+<path d="M100 35 L135 115 L65 115 Z" fill="black" transform="rotate(240 100 100)"/>
+</svg>' />
 
 <style>
 body {
   font-family: Helvetica, Arial, sans-serif;
   background:#eef2f8;
-  color:#0d1117;
   margin:0; padding:20px;
+  color:#0d1117;
 }
+.row { display:flex; gap:20px; width:100%; margin-bottom:20px; }
+.col { flex:1; display:flex; flex-direction:column; }
 .card {
-  background:#ffffff;
-  padding:22px;
-  border-radius:16px;
-  max-width:1200px;
-  margin:auto;
+  background:white;
+  padding:18px;
+  border-radius:14px;
   box-shadow:0 3px 10px rgba(0,0,0,0.15);
 }
-h2 {
-  margin-bottom:12px;
-  font-weight:600;
-  color:#0d1117;
+.equal-card {
+  height:360px;
+  display:flex;
+  flex-direction:column;
 }
+table { width:100%; border-collapse:collapse; font-size:17px; }
+th { background:#f2f4f8; font-weight:600; }
+td, th { padding:8px; border-bottom:1px solid #e3e3e3; }
+
+/* Live table: labels left, values right */
+.live-table td:first-child { text-align:left; }
+.live-table td:last-child  { text-align:right; font-family:"Courier New", monospace; }
+
+/* Log table: number alignment stable */
+.log-table th, .log-table td { text-align:right; font-family:"Courier New", monospace; }
+
 button {
-  font-size:18px;
-  background:#2563eb;
-  color:white;
-  padding:8px 18px;
-  border:none;
-  border-radius:8px;
-  cursor:pointer;
-  margin-right:6px;
+  font-size:16px; padding:8px 14px;
+  border:none; border-radius:8px;
+  background:#2563eb; color:white; cursor:pointer;
+  margin:4px;
 }
 button:hover { background:#1e40af; }
-select {
-  font-size:17px;
-  padding:6px;
-  margin-top:10px;
-  border-radius:6px;
-  border:1px solid #ccc;
-}
-.data-box {
-  font-size:20px;
-  margin:6px 0;
-  font-weight:500;
-}
-.canvas-box {
-  background:white;
-  padding:8px;
+
+.scroll-box {
+  max-height:350px;
+  overflow-y:auto;
+  border:1px solid #d0d0d0;
   border-radius:8px;
-  border:1px solid #ccc;
   margin-top:10px;
 }
-canvas {
-  width:100%;
-  height:200px;
-}
-table {
-  width:100%;
-  margin-top:14px;
-  border-collapse:collapse;
-  font-size:17px;
-}
-th, td {
-  border:1px solid #ccc;
-  padding:5px;
-  text-align:center;
-}
-th {
-  background:#f2f4f8;
-  font-weight:600;
-}
 
-/* Solid bar background */
 .range-bar {
-  position:relative;
-  height:35px;
-  margin-top:20px;
-  border-radius:10px;
-  overflow:hidden;
-  border:1px solid #b3becd;
-  background:#cccccc;
+  height:40px; width:100%; background:#ccc; border-radius:6px; overflow:hidden;
 }
-
-/* Filled section — colour updated dynamically by JS */
-.range-fill {
-  height:100%;
-  width:0%;
-  background:#00a000;
-  transition:width 0.25s ease-in-out, background-color 0.25s linear;
-}
-
-.context-label-live {
-  font-size:18px;
-  text-align:right;
-  margin-top:6px;
-  font-weight:600;
-  color:#0d1117;
+.fill {
+  height:100%; width:0%; background:green;
+  transition:width .25s, background-color .25s;
 }
 </style>
 </head>
 
 <body>
-<div class="card">
-<h2>ESP32 Radiation Monitor</h2>
+<h2>GeigerLink</h2>
 
-<button id="connect">Connect</button>
+<div class="row">
+
+<!-- Controls -->
+<div class="col">
+<div class="card equal-card">
+<h3>Controls</h3>
+<button id="connectBtn">Connect</button>
 <button id="startBtn">Start</button>
 <button id="stopBtn">Stop</button>
-<button id="exportBtn">Export CSV</button>
-
-<div class="data-box">Last Pulse ADC: <span id="adc">--</span></div>
-<div class="data-box">Total Counts: <span id="total">0</span></div>
-<div class="data-box">Dose Rate: <span id="dose">0.000</span> µSv/h</div>
-
-<label>Counts per:</label>
-<select id="avgSelect">
-  <option value="1">Second</option>
-  <option value="60">Minute</option>
-  <option value="300">5 Minutes</option>
-  <option value="600">10 Minutes</option>
-</select>
-
-<div class="canvas-box">
-<canvas id="histCanvas" width="1000" height="200"></canvas>
+<button id="exportBtn">Export CSV</button><br>
+<button id="soundToggleBtn">Sound: OFF</button>
+</div>
 </div>
 
-<div class="range-bar">
-  <div class="range-fill" id="rangeFill"></div>
-</div>
-<div class="context-label-live" id="contextLabel">Normal Background</div>
-
-<table id="dataTable">
-<tr>
-  <th>Time (s)</th>
-  <th>Total</th>
-  <th>Counts/Interval</th>
-  <th>µSv/h</th>
-</tr>
+<!-- Live Data -->
+<div class="col">
+<div class="card equal-card">
+<h3>Live Data</h3>
+<table class="live-table">
+<tr><td><b>ADC</b></td><td id="live_adc">0</td></tr>
+<tr><td><b>Total Counts</b></td><td id="live_total">0</td></tr>
+<tr><td><b>CPS</b></td><td id="live_rate">0.0</td></tr>
+<tr><td><b>CPM</b></td><td id="live_cpm">0</td></tr>
+<tr><td><b>µSv/h</b></td><td id="live_usvh">0.000</td></tr>
+<tr><td><b>mrem/h</b></td><td id="live_mremh">0.000</td></tr>
 </table>
+</div>
+</div>
 
+<!-- Logging -->
+<div class="col">
+<div class="card equal-card">
+<h3>Logging</h3>
+<div class="scroll-box">
+<table class="log-table">
+<thead><tr><th>Time</th><th>CPS</th><th>Total</th></tr></thead>
+<tbody id="pulseTable"></tbody>
+</table>
+</div>
+</div>
+</div>
+
+</div>
+
+<!-- Dose bar -->
+<div class="card" style="width:100%; margin-top:15px;">
+<h3>Radiation Level</h3>
+<div class="range-bar"><div id="bar" class="fill"></div></div>
+<div id="contextText" style="font-size:18px; margin-top:8px; font-weight:600;">
+Radiation level equal to: Normal Background
+</div>
 </div>
 
 <script>
@@ -151,149 +134,146 @@ let running = false;
 let startTime = 0;
 let totalCounts = 0;
 let intervalCounts = 0;
-let bins = [];
-const barWidth = 2;
 const uSvPerCPM = 0.0057;
 
+/* rolling windows */
+let cpsWindow = [];
+let doseWindow = [];
+const windowSize = 30; // last 10 seconds smoothing
+
+/* thresholds */
 const thresholds = [
-  { level:0.01,  name:"Deep Underground Lab" },
-  { level:0.05,  name:"Normal Background" },
-  { level:0.15,  name:"NZ Background (typical)" },
-  { level:1,     name:"High-background region" },
-  { level:3,     name:"Commercial Flight" },
-  { level:6,     name:"High-Altitude City" },
-  { level:8,     name:"Polar Aviation Route" },
-  { level:12,    name:"Dental X-ray (rate)" },
-  { level:20,    name:"Fukushima Perimeter" },
-  { level:30,    name:"Radon Hotspot (UK)" },
-  { level:50,    name:"Ramsar, Iran" },
-  { level:100,   name:"Fukushima Worker Gate" }
+{level:0.01, name:"Deep Underground Lab"},
+{level:0.05, name:"Normal Background"},
+{level:0.15, name:"NZ Background (typical)"},
+{level:1, name:"High-background region"},
+{level:3, name:"Commercial Flight"},
+{level:6, name:"High-altitude city"},
+{level:8, name:"Polar aviation route"},
+{level:12, name:"Dental X-ray (hour)"},
+{level:20, name:"Fukushima Perimeter"},
+{level:30, name:"Radon Hotspot (UK)"},
+{level:50, name:"Ramsar, Iran"},
+{level:100, name:"Fukushima Worker Gate"}
 ];
-
-let avgWindow = 1;
-
-const canvas = document.getElementById("histCanvas");
-const ctx = canvas.getContext("2d");
-const table = document.getElementById("dataTable");
-const doseLabel = document.getElementById("dose");
-const rangeFill = document.getElementById("rangeFill");
-const contextLabel = document.getElementById("contextLabel");
-
-function resetAll() {
-  totalCounts = 0;
-  intervalCounts = 0;
-  bins = [];
-  startTime = performance.now();
-  document.getElementById("total").textContent = "0";
-  table.innerHTML = `<tr><th>Time (s)</th><th>Total</th><th>Counts/Interval</th><th>µSv/h</th></tr>`;
+function classify(u){
+ for(let t of thresholds) if(u <= t.level) return t.name;
+ return thresholds.at(-1).name;
 }
 
-function drawHistogram() {
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  if (bins.length===0) return;
-  const max = Math.max(...bins);
-  const scale = max>0 ? canvas.height/max : 1;
-  for (let i=0;i<bins.length;i++){
-    ctx.fillStyle="#2563eb";
-    ctx.fillRect(i*barWidth, canvas.height-(bins[i]*scale), barWidth, bins[i]*scale);
-  }
+/* Geiger click */
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let clickEnabled = false;
+function geigerClick(){
+ if(!clickEnabled) return;
+ const osc = audioCtx.createOscillator();
+ const gain = audioCtx.createGain();
+ osc.type = "square";
+ osc.frequency.value = 4500;
+ gain.gain.value = 0.10;
+ osc.connect(gain);
+ gain.connect(audioCtx.destination);
+ osc.start();
+ osc.stop(audioCtx.currentTime + 0.002);
 }
+document.getElementById("soundToggleBtn").onclick=()=>{
+ clickEnabled = !clickEnabled;
+ audioCtx.resume();
+ document.getElementById("soundToggleBtn").textContent =
+   clickEnabled ? "Sound: ON" : "Sound: OFF";
+};
 
-function addBin(v){
-  bins.push(v);
-  const maxBars = Math.floor(canvas.width/barWidth);
-  if(bins.length>maxBars) bins.shift();
-  drawHistogram();
-}
-
-function addRow(t,total,interval,uSv){
-  const r = table.insertRow(1);
-  r.insertCell(0).textContent = t;
-  r.insertCell(1).textContent = total;
-  r.insertCell(2).textContent = interval;
-  r.insertCell(3).textContent = uSv.toFixed(3);
-}
-
-function handlePulse(v){
-  if(!running) return;
-  document.getElementById("adc").textContent=v;
-  totalCounts++;
-  intervalCounts++;
-  document.getElementById("total").textContent=totalCounts;
-}
-
-function classify(uSv){
-  for (let i=0;i<thresholds.length;i++){
-    if(uSv <= thresholds[i].level) return thresholds[i].name;
-  }
-  return thresholds[thresholds.length-1].name;
-}
-
+/* Serial reading */
 async function readLoop(){
-  while(true){
-    const {value,done}=await reader.read();
-    if(done) break;
-    if(!value) continue;
-    const x=parseInt(value.trim());
-    if(!isNaN(x)) handlePulse(x);
+ while(true){
+  const {value,done} = await reader.read();
+  if(done) break;
+  if(!value) continue;
+  const x = parseInt(value.trim());
+  if(!isNaN(x) && running){
+    totalCounts++;
+    intervalCounts++;
+    geigerClick();
+    document.getElementById("live_adc").textContent = x;
+    document.getElementById("live_total").textContent = totalCounts;
   }
+ }
 }
 
-/* update once per second */
+/* Connect */
+document.getElementById("connectBtn").onclick=async()=>{
+ port = await navigator.serial.requestPort();
+ await port.open({baudRate:115200});
+ port.readable.pipeTo(decoder.writable);
+ reader = decoder.readable.getReader();
+ writer = port.writable.getWriter();
+ readLoop();
+};
+
+/* Start */
+document.getElementById("startBtn").onclick=()=>{
+ running = true;
+ totalCounts=0;
+ intervalCounts=0;
+ cpsWindow=[];
+ doseWindow=[];
+ startTime = performance.now();
+ document.getElementById("pulseTable").innerHTML="";
+};
+
+/* Stop */
+document.getElementById("stopBtn").onclick=()=> running=false;
+
+/* Update each second */
 setInterval(()=>{
  if(!running) return;
+
  const elapsed = Math.floor((performance.now()-startTime)/1000);
  const cps = intervalCounts;
  const cpm = cps * 60;
- const uSv = cpm * uSvPerCPM;
+ const u = cpm * uSvPerCPM;
 
- doseLabel.textContent = uSv.toFixed(3);
+ cpsWindow.push(cps);
+ if(cpsWindow.length > windowSize) cpsWindow.shift();
+ const avgCPS = cpsWindow.reduce((a,b)=>a+b,0) / cpsWindow.length;
+ const avgCPM = avgCPS * 60;
 
- const pct = Math.min(100, (uSv/100)*100);
- rangeFill.style.width = pct + "%";
- contextLabel.textContent = classify(uSv);
+ doseWindow.push(u);
+ if(doseWindow.length > windowSize) doseWindow.shift();
+ const avgDose = doseWindow.reduce((a,b)=>a+b,0) / doseWindow.length;
 
- // colour change solid fill green→yellow→red
- let r, g;
- if (pct <= 50) {
-   r = Math.floor((pct/50) * 255);
-   g = 160 + Math.floor((pct/50) * (255-160));
- } else {
-   r = 255 - Math.floor(((pct-50)/50) * (255-212));
-   g = 255 - Math.floor(((pct-50)/50) * 255);
- }
- rangeFill.style.background = `rgb(${r},${g},0)`;
+ document.getElementById("live_rate").textContent  = avgCPS.toFixed(1);
+ document.getElementById("live_cpm").textContent   = Math.round(avgCPM);
+ document.getElementById("live_usvh").textContent  = avgDose.toFixed(3);
+ document.getElementById("live_mremh").textContent = (avgDose*100).toFixed(3);
 
- addBin(intervalCounts);
- addRow(elapsed,totalCounts,intervalCounts,uSv);
+ const p = Math.min(100, avgDose);
+ const bar = document.getElementById("bar");
+ bar.style.width = p+"%";
+ bar.style.background = (p<50?"green":p<80?"gold":"red");
+
+ document.getElementById("contextText").textContent =
+   "Radiation level equal to: " + classify(avgDose);
+
+ const r=document.createElement("tr");
+ r.innerHTML=`<td>${elapsed}</td><td>${avgCPS.toFixed(1)}</td><td>${totalCounts}</td>`;
+ document.getElementById("pulseTable").prepend(r);
 
  intervalCounts = 0;
 },1000);
 
-document.getElementById("connect").onclick=async()=>{
- port=await navigator.serial.requestPort();
- await port.open({baudRate:115200});
- port.readable.pipeTo(decoder.writable);
- reader=decoder.readable.getReader();
- writer=port.writable.getWriter();
- readLoop();
-};
-
-document.getElementById("startBtn").onclick=()=>{running=true;resetAll();};
-document.getElementById("stopBtn").onclick=()=>running=false;
-document.getElementById("avgSelect").onchange=e=>{avgWindow=parseInt(e.target.value);};
-
+/* Export */
 document.getElementById("exportBtn").onclick=()=>{
- let rows=[["Time","Total","Interval","µSv/h"]];
- [...table.rows].slice(1).forEach(r=>{
-   rows.push([r.cells[0].innerText,r.cells[1].innerText,r.cells[2].innerText,r.cells[3].innerText]);
+ let rows=[["Time","CPS","Total"]];
+ [...document.getElementById("pulseTable").rows].forEach(r=>{
+  rows.push([r.cells[0].innerText,r.cells[1].innerText,r.cells[2].innerText]);
  });
- const blob=new Blob([rows.map(r=>r.join(",")).join("\n")],{type:"text/csv"});
- const url=URL.createObjectURL(blob);
+ const blob=new Blob([rows.map(e=>e.join(",")).join("\n")],{type:"text/csv"});
  const a=document.createElement("a");
- a.href=url;a.download="radiation_log.csv";a.click();
+ a.href=URL.createObjectURL(blob);
+ a.download="radiation_log.csv";
+ a.click();
 };
 </script>
-
 </body>
 </html>
